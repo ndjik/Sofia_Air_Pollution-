@@ -81,7 +81,7 @@ summary(mod)
 
 ### Linearity, normality and homoscedasticity
 NB: Ignore the fourth plot
-```{r LR8}
+```{r LR8, echo=FALSE}
 plot(mod) 
 ```
 
@@ -130,12 +130,12 @@ summary(mod_gam)
 ````
 
 ### Partial effects plot 
-```{r GAM3}
+```{r GAM3, echo=FALSE}
 plot(mod_gam, rug = TRUE, residuals = TRUE, pch = 1, cex = 1, pages=4, shade = TRUE, shade.col = "lightblue")
 `````
 
 ### Spatial interaction 
-```{r GAM4}
+```{r GAM4, echo=FALSE}
 vis.gam(mod_gam, view = c("X", "Y"), plot.type = "contour", too.far = 0.15)
 `````
 
