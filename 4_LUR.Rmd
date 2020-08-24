@@ -1,0 +1,192 @@
+---
+title: "4) Land Use Regression"
+output: github_document
+---
+
+NB: need the 'winterpol7 data' (from file 3) 
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+````{r lis, include=FALSE}
+library(sf)
+library(tidyverse)
+library(raster)
+library(geohashTools)
+library(lubridate)
+library(dplyr)
+library(xts)
+library(ggplot2)
+library(tidyr)
+library(caret)
+library(MASS)
+library(car)
+`````
+
+```{r data, include=FALSE}
+winterpol7<- read.csv('dj.csv', header=T)
+```
+
+# Linear regression 
+
+### Cleaning the data ("winterpol7")
+We remove missing values (we do a complete case analysis)
+
+```{r data2, echo=T, results='hide'}
+dj <- winterpol7
+dj <- dj[complete.cases(dj), ] 
+
+```
+
+### Forward stepwise selection 
+*** Will underfit the model ***
+````{r LR2, echo=T, results = F}
+full.model <- lm(log(P2) ~., data = dj)
+
+step.model <- stepAIC(full.model, direction = "forward", 
+                      trace = FALSE)
+```
+```{r LR3}
+summary(step.model)
+```
+4 significant predictors (5%): humidity, number of recordings, residential area (1000m), building density (300m). 
+Solid fuel burning (at any buffer size) is not even significant at the 10% level
+Adjusted R-squared = 0.34
+NB: in the model, number of recordings is under the name 'Freq'
+
+### Backward stepwise selection 
+*** Will overfit the model ***
+
+```{r LR4, echo=T, results='hide'} 
+step.model <- stepAIC(full.model, direction = "backward", 
+                      trace = FALSE)
+````
+                      
+```{r LR5}
+summary(step.model)
+```
+
+13 ignificant predictors (5% level): humidity, pressure, number of recordings, residential area (1000m), green area (1000m), trunk length (500m), primary road length (500m), secondary road length (1000m), solid fuel burning (100m), building density (300m), average number of floors (25m), X coordinate
+
+### Final LR 
+After some toying we select the final model, explained in detail in the dissertation: 
+```{r LR6, echo=T, results =F}
+mod <- lm(log(P2)~humidity + Freq + bui_300 +  nafta_av100+ Y, data=dj) 
+```
+````{r LR7}
+summary(mod)
+````
+
+### Linearity, normality and homoscedasticity
+NB: Ignore the fourth plot
+```{r LR8}
+plot(mod) 
+```
+
+### Multicollinearity
+```{r LR9}
+vif(mod)
+```
+
+### Independent error terms 
+
+Durbin watson statistic: 
+```{r LR10}
+durbinWatsonTest(mod) 
+```
+### Cross-Validation 
+k-fold (k=10)
+```{r LRCV, echo=T, results = 'hide'}
+
+# (using library 'caret')
+
+# Define training control
+train.control <- trainControl(method = "cv", number = 10)
+# Train the model
+model <- train(log(P2)~humidity + Freq +bui_300 +  nafta_av100+ Y, data = dj, method = "lm", trControl = train.control)
+```
+```{r LRCV1}
+# Summarize the results
+print(model)
+```
+
+# Generalised Additive Model 
+
+*** The GAM is based on the mgcv package ***
+```{r GAM0, echo= T, results='hide'}
+library(mgcv)
+`````
+
+Since we could not find a selection method to select the significant variables, we used the significant variables of LR, adding and removing some. 
+```{r GAM1, echo=T, results='hide'}
+mod_gam <- gam(P2 ~ s(humidity) + Freq + s(bui_300) + s(X,Y) + nafta_av100 +s(temperature), data=dj, method='REML')
+`````
+
+### Linear and smooth terms 
+```{r GAM2}
+summary(mod_gam)
+````
+
+### Partial effects plot 
+```{r GAM3}
+plot(mod_gam, rug = TRUE, residuals = TRUE, pch = 1, cex = 1, pages=4, shade = TRUE, shade.col = "lightblue")
+`````
+
+### Spatial interaction 
+```{r GAM4}
+vis.gam(mod_gam, view = c("X", "Y"), plot.type = "contour", too.far = 0.15)
+`````
+
+### Number of basis functions 
+None of the p-values associated with the smooth terms are significant, implying that there are enough basis functions for each smooth term. 
+Each smooth term has 9 basis functions, except for the interaction, which has 29. 
+```{r GAM5}
+gam.check(mod_gam)
+`````
+
+### Concurvity 
+
+Since concurvity is complex, the function reports three different ways of measuring concurvity. Each is better in some situations. What is important is that you should always look at the worst case, and if the value is high (say, over 0.8), inspect your model more carefully.
+
+````{r conc1}
+concurvity(mod_gam, full = TRUE) 
+`````
+Here, humidity and concurvity have high concurvity (above 0.8)
+
+This is why, we use the second mode of the function, setting full = FALSE. With full = FALSE, the function returns matrices of pairwise concurvities. These show the degree to which each variable is predetermined by each other variable, rather than all the other variables. 
+
+````{r conc2}
+concurvity(mod_gam, full = FALSE) 
+`````
+
+None of the values are high, which means there is no issue of concurvity. 
+
+### Cross-Validation 
+The CV used the archived 'gamclass'package. The package was downloaded onto a local device and read in 'manually' in R. 
+
+##### Installing gamclass 
+```{r inst}
+
+# using the link of the CRAN archive:
+#url <- "https://cran.r-project.org/src/contrib/Archive/gamclass/gamclass_0.58.tar.gz"
+#pkgFile <- "gamclass_0.58.tar.gz"
+#download.file(url = url, destfile = pkgFile)
+
+# Install dependencies:
+#install.packages(c("ada", "ipred", "evd"))
+
+# Install package
+#install.packages(pkgs=pkgFile, type="source", repos=NULL)
+````
+
+```{r GAMCV1}
+library(gamclass)
+```
+
+##### CV test
+````{r GAMCV2}
+CVgam(formula = (P2 ~ s(humidity) + Freq + s(bui_300) + s(X,Y) + nafta_av100 +s(temperature)), data=dj, nfold = 10, debug.level = 0, method = "REML", printit=TRUE, cvparts = NULL, gamma=1)
+```
+
